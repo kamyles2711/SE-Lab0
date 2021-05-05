@@ -890,8 +890,7 @@ void do_decode_stage()
 {
     /* your implementation */
 
-    // word_t valA = -1;
-    // word_t valB = -1;
+
     // d_regvala = get_reg_val(reg, execute_output->srca);
     // d_regvalb - get_reg_val(reg, execute_output->srcb);
     execute_input->deste = REG_NONE;
@@ -1055,6 +1054,12 @@ void do_decode_stage()
     else
         execute_input->valb = get_reg_val(reg, execute_output->srcb);
 
+    execute_input->icode = decode_output->icode;
+    execute_input->ifun = decode_output->ifun;
+    execute_input->valc = decode_output->valc;
+    execute_input->status = decode_output->status;
+    execute_input->stage_pc = decode_output->stage_pc;
+
 }
 
 /************************** Execute stage **************************
@@ -1073,34 +1078,122 @@ void do_execute_stage()
     alua = alub = 0;
 
     /* your implementation */
-
-
+    bool set_cc = false;
+    int call_push = -8;
+    int ret_pop = 8;
 
     //select input A to ALU
+    switch(execute_output->icode){
+        case I_RRMOVQ:
+            alua = execute_output->vala;
+            break;
 
+        case I_ALU:
+            alua = execute_output->vala;
+            break;
+
+        case I_IRMOVQ:
+            alua = execute_output->valc;
+            break;
+
+        case I_RMMOVQ:
+            alua = execute_output->valc;
+            break;
+
+        case I_MRMOVQ:
+            alua = execute_output->valc;
+            break;
+
+        case I_CALL:
+            alua = call_push;
+            break;
+
+        case I_PUSHQ:
+            alua = call_push;
+            break;
+
+        case I_RET:
+            alua = ret_pop;
+            break;
+
+        case I_POPQ:
+            alua = ret_pop;
+            break;
+    }
 
 
     //select input B to ALU
+    switch(execute_output->icode){
+        case I_RRMOVQ:
+            alub = 0;
+            break;
 
+        case I_ALU:
+            alub = execute_output->valb;
+            break;
 
+        case I_IRMOVQ:
+            alub = 0;
+            break;
+
+        case I_RMMOVQ:
+            alub = execute_output->valb;
+            break;
+
+        case I_MRMOVQ:
+            alub = execute_output->valb;
+            break;
+
+        case I_CALL:
+            alub = execute_output->valb;
+            break;
+
+        case I_PUSHQ:
+            alub = execute_output->valb;
+            break;
+
+        case I_RET:
+            alub = execute_output->valb;
+            break;
+
+        case I_POPQ:
+            alub = execute_output->vala;
+            break;
+    }
 
     //set ALU function
+    switch(execute_output->icode){
+        case I_ALU:
+            alufun = execute_output->ifun;
+            break;
 
+        default:
+            alufun = A_ADD;
+            break;
+    }
 
+    //set valE
+    memory_input->vale = compute_alu(alufun, alua, alub);
 
-    //do condition codes need to be updated?
-
-
-
-    //set valA
-
-
+    //set cc
+    bool m_statval = !(writeback_input->status == STAT_HLT || writeback_input->status == STAT_INS || writeback_input->status == STAT_ADR);
+    bool W_statval = !(writeback_output->status == STAT_HLT || writeback_output->status == STAT_INS || writeback_output->status == STAT_ADR);
+    if(execute_output->icode == I_ALU && m_statval && W_statval)
+        set_cc = true;
+    if(set_cc)
+        cc_in = compute_cc(alufun, alua, alub);
 
     //set E dest to RNONE if cond mov false
+    if((execute_output->icode == I_RRMOVQ) && !cond_holds(cc, execute_output->ifun))
+        memory_input->deste = REG_NONE;
 
-
-
-
+    memory_input->icode = execute_output->icode;
+    memory_input->ifun = execute_output->ifun;
+    memory_input->takebranch = cond_holds(cc, execute_output->ifun);
+    memory_input->deste = execute_output->deste;
+    memory_input->destm = execute_output->destm;
+    memory_input->status = execute_output->status;
+    memory_input->stage_pc = execute_output->stage_pc;
 
     /* logging functions, do not change these */
     if (execute_output->icode == I_JMP) {
@@ -1126,52 +1219,101 @@ void do_memory_stage()
 {
     /* dummy placeholders, replace them with your implementation */
     mem_addr   = 0;
-    mem_data   = 0;
-    mem_write  = false;
+    //mem_data   = 0;
+    //bool write  = false;
+    bool read = false;
     mem_read   = false;
     dmem_error = false;
+    word_t valM = 0; 
 
     /* your implementation */
 
-
+    //set read control signal
+    switch(memory_output->icode){
+        case I_MRMOVQ:
+            read = true;
+            break;
+        case I_POPQ:
+            read = true;
+            break;
+        case I_RET:
+            read = true;
+            break;
+        default:
+            read = false;
+    }
 
     //select mem_addr
+    switch(memory_output->icode){
+        case I_RRMOVQ:
+            mem_addr = memory_output->vale;
+            break;
 
+        case I_MRMOVQ:
+            mem_addr = memory_output->vale;
+            break;
 
+        case I_PUSHQ:
+            mem_addr = memory_output->vale;
+            break;
 
-    //set read control signal
+        case I_CALL:
+            mem_addr = memory_output->vale;
+            break;
 
+        case I_POPQ:
+            mem_addr = memory_output->vala;
+            break;
 
+        case I_RET:
+            mem_addr = memory_output->vala;
+            break;
+
+        default:
+            break;
+
+    }
 
     //set write control signal
+    switch(memory_output->icode){
 
+        case I_RMMOVQ:
+            mem_write = true;
+            break;
+        
+        case I_PUSHQ:
+            mem_write = true;
+            break;
+        
+        case I_CALL:
+            mem_write = true;
+            break; 
 
+        default:
+            mem_write = false;
+            break;
+    }
+
+    //check read
+    if(read)
+        dmem_error |= !get_word_val(mem, mem_addr, &valM);
+    if(mem_write){
+        word_t temp;
+        dmem_error |= !get_word_val(mem, mem_addr, &temp);
+    }
 
     //update status
+    if(dmem_error)
+        writeback_input->status = STAT_ADR;
+    else
+        writeback_input->status = memory_output->status;
 
-
-
-    //set E port reg 
-
-
-
-    //set E port val
-
-
-
-    //set M port reg
-
-
-
-    //set M port val
-
-
-
-    //update pc status
-
-
-
-
+    writeback_input->icode = memory_output->icode;
+    writeback_input->ifun = memory_output->ifun;
+    writeback_input->vale = memory_output->vale;
+    writeback_input->valm = valM;
+    writeback_input->deste= memory_output->status;
+    writeback_input->destm= memory_output->stage_pc;
 
 
     if (mem_read) {
@@ -1198,10 +1340,10 @@ void do_memory_stage()
 void do_writeback_stage()
 {
     /* dummy placeholders, replace them with your implementation */
-    wb_destE = REG_NONE;
-    wb_valE  = 0;
-    wb_destM = REG_NONE;
-    wb_valM  = 0;
+    wb_destE = writeback_output->deste;
+    wb_valE  = writeback_output->vale;
+    wb_destM = writeback_output->destm;
+    wb_valM  = writeback_output->valm;
 
     /* your implementation */
 
@@ -1246,25 +1388,23 @@ void do_stall_check()
 {
     /* your implementation */
 
+    // bool load_haz = ((execute_output->icode == I_MRMOVQ || execute_output->icode == I_POPQ) && (execute_output->destm == execute_input->srca || execute_output->destm == execute_input->srcb));
+    // bool proc_ret = decode_output->icode == I_RET || execute_output->icode == I_RET || memory_output->icode == I_RET;
+    // bool mis_branch = execute_output->icode == I_JMP && !memory_input->takebranch;
 
+    // bool f_bubble = false;
+    // bool f_stall = load_haz || proc_ret;
+    // bool d_bubble = mis_branch || (proc_ret && !load_haz);
+    // bool d_stall = load_haz;
+    // bool e_bubble = mis_branch || load_haz;
+    // bool e_stall = false;
+    // bool m_bubble = ((writeback_input == STAT_ADR || writeback_input == STAT_INS || writeback_input == STAT_HLT) || (writeback_output == STAT_ADR || writeback_output == STAT_INS || writeback_output == STAT_HLT));
+    // bool m_stall = false;
+    // bool w_bubble = false;
+    // bool w_stall = writeback_output == STAT_ADR || writeback_output == STAT_INS || writeback_output == STAT_HLT;
 
-    //stall or bubble reg F
+    
 
-
-
-    //stall or bubble reg D
-
-
-
-    //stall or bubble reg E
-
-
-
-    //stall or bubble reg M
-
-
-
-    //stall or bubble reg W
 
     // dummy placeholders to show the usage of pipe_cntl()
     fetch_state->op     = pipe_cntl("PC", false, false);
